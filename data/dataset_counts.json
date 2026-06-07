@@ -1,0 +1,12 @@
+{
+  "departments": 6,
+  "users": 60,
+  "projects": 12,
+  "project_members": 124,
+  "tasks": 420,
+  "attendance_records": 6660,
+  "devices": 25,
+  "device_usage_records": 1200,
+  "meetings": 180,
+  "meeting_participants": 1202
+}

@@ -1,0 +1,145 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nlp2sql-postgres
+    environment:
+      POSTGRES_DB: nlp2sql_demo
+      POSTGRES_USER: nlp2sql
+      POSTGRES_PASSWORD: nlp2sql_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/01_init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./infra/02_import.sql:/docker-entrypoint-initdb.d/02_import.sql:ro
+      - ./data:/seed_data:ro
+    networks:
+      - nlp2sql_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nlp2sql -d nlp2sql_demo && psql -U nlp2sql -d nlp2sql_demo -tAc \"SELECT ((SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('attendance_records', 'departments', 'device_usage_records', 'devices', 'meeting_participants', 'meetings', 'project_members', 'projects', 'tasks', 'users')) = 10 AND (SELECT COUNT(*) FROM public.users) > 0)::int\" | grep -q 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  adminer:
+    image: adminer:4
+    container_name: nlp2sql-adminer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    networks:
+      - nlp2sql_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: nlp2sql-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - nlp2sql_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  chroma:
+    image: chromadb/chroma:0.5.23
+    container_name: nlp2sql-chroma
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    networks:
+      - nlp2sql_network
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/heartbeat"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+    container_name: nlp2sql-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
+    environment:
+      APP_NAME: NLP2SQL Agent API
+      APP_VERSION: 0.1.0
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: postgresql+psycopg2://nlp2sql:nlp2sql_password@postgres:5432/nlp2sql_demo
+      REDIS_URL: redis://redis:6379/0
+      REDIS_KEY_PREFIX: nlp2sql
+      REDIS_DEFAULT_TTL_SECONDS: 3600
+      DB_SCHEMA: public
+      VECTOR_STORE_PROVIDER: chroma
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
+      CHROMA_COLLECTION_NAME: nlp2sql_schema
+      VECTOR_STORE_STARTUP_RETRIES: 20
+      VECTOR_STORE_STARTUP_RETRY_DELAY_SECONDS: 1.5
+      EMBEDDING_PROVIDER: local
+      EMBEDDING_MODEL: local-hash-v1
+      EMBEDDING_DIMENSION: 384
+      EMBEDDING_BATCH_SIZE: 16
+      EMBEDDING_TIMEOUT_SECONDS: 10
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-mock-llm}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+      LLM_RETRY_BACKOFF_SECONDS: ${LLM_RETRY_BACKOFF_SECONDS:-1}
+      SQL_DEFAULT_LIMIT: ${SQL_DEFAULT_LIMIT:-100}
+      SQL_MAX_LIMIT: ${SQL_MAX_LIMIT:-500}
+      SQL_STATEMENT_TIMEOUT_MS: ${SQL_STATEMENT_TIMEOUT_MS:-5000}
+      SQL_EXECUTOR_MAX_ROWS: ${SQL_EXECUTOR_MAX_ROWS:-500}
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080
+    ports:
+      - "8000:8000"
+    networks:
+      - nlp2sql_network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: nlp2sql-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+      VITE_API_TIMEOUT_MS: 180000
+    ports:
+      - "5173:5173"
+    networks:
+      - nlp2sql_network
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:5173').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  postgres_data:
+  chroma_data:
+
+networks:
+  nlp2sql_network:
+    driver: bridge

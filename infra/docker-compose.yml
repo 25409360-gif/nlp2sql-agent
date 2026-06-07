@@ -1,0 +1,6 @@
+# Root-level ../docker-compose.yml is the default startup file.
+# This file exists to keep the infrastructure folder complete for the step-by-step plan.
+
+include:
+  - ../docker-compose.yml
+

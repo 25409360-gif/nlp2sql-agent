@@ -1,0 +1,9 @@
+.env
+.DS_Store
+__pycache__/
+*.py[cod]
+node_modules/
+dist/
+*.log
+data/manual_evaluation_results*.jsonl
+postgres-data/
