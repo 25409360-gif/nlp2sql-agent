@@ -61,6 +61,102 @@ class FakeSchemaService:
                 "primary_keys": [],
                 "foreign_keys": [],
             },
+            "china_temperature_distribution_150_rows": {
+                "name": "china_temperature_distribution_150_rows",
+                "description": "Imported from file: china_temperature_distribution_150_rows.xlsx",
+                "columns": [
+                    {
+                        "name": "record_id",
+                        "type": "TEXT",
+                        "description": "Original column: record_id; inferred type: text",
+                    },
+                    {
+                        "name": "province",
+                        "type": "TEXT",
+                        "description": "Original column: province; inferred type: text",
+                    },
+                    {
+                        "name": "city",
+                        "type": "TEXT",
+                        "description": "Original column: city; inferred type: text",
+                    },
+                    {
+                        "name": "district",
+                        "type": "TEXT",
+                        "description": "Original column: district; inferred type: text",
+                    },
+                    {
+                        "name": "station_id",
+                        "type": "TEXT",
+                        "description": "Original column: station_id; inferred type: text",
+                    },
+                    {
+                        "name": "latitude",
+                        "type": "NUMERIC",
+                        "description": "Original column: latitude; inferred type: numeric",
+                    },
+                    {
+                        "name": "longitude",
+                        "type": "NUMERIC",
+                        "description": "Original column: longitude; inferred type: numeric",
+                    },
+                    {
+                        "name": "avg_temp_c",
+                        "type": "NUMERIC",
+                        "description": "Original column: avg_temp_c; inferred type: numeric",
+                    },
+                    {
+                        "name": "max_temp_c",
+                        "type": "NUMERIC",
+                        "description": "Original column: max_temp_c; inferred type: numeric",
+                    },
+                    {
+                        "name": "min_temp_c",
+                        "type": "NUMERIC",
+                        "description": "Original column: min_temp_c; inferred type: numeric",
+                    },
+                    {
+                        "name": "humidity_percent",
+                        "type": "NUMERIC",
+                        "description": "Original column: humidity_percent; inferred type: numeric",
+                    },
+                    {
+                        "name": "wind_speed_kmh",
+                        "type": "INTEGER",
+                        "description": "Original column: wind_speed_kmh; inferred type: integer",
+                    },
+                ],
+                "primary_keys": [],
+                "foreign_keys": [],
+            },
+            "employee_compensation_upload": {
+                "name": "employee_compensation_upload",
+                "description": "Imported employee compensation table.",
+                "columns": [
+                    {
+                        "name": "department",
+                        "type": "TEXT",
+                        "description": "Original column: Department; inferred type: text",
+                    },
+                    {
+                        "name": "employee_name",
+                        "type": "TEXT",
+                        "description": "Original column: Employee Name; inferred type: text",
+                    },
+                    {
+                        "name": "salary",
+                        "type": "NUMERIC",
+                        "description": "Original column: Salary; inferred type: numeric",
+                    },
+                    {
+                        "name": "overtime_hours",
+                        "type": "NUMERIC",
+                        "description": "Original column: Overtime Hours; inferred type: numeric",
+                    },
+                ],
+                "primary_keys": [],
+                "foreign_keys": [],
+            },
         }
         return schemas.get(table_name)
 
@@ -83,6 +179,36 @@ SCHEMA_CONTEXT = [
             "Imported airport operations table. Columns: aircraft_type, delay_minutes, "
             "passenger_count, revenue_hkd."
         ),
+    },
+    {
+        "table_name": "china_temperature_distribution_150_rows",
+        "columns": [
+            "record_id",
+            "province",
+            "city",
+            "district",
+            "station_id",
+            "latitude",
+            "longitude",
+            "avg_temp_c",
+            "max_temp_c",
+            "min_temp_c",
+            "humidity_percent",
+            "wind_speed_kmh",
+        ],
+        "content": (
+            "Imported temperature table. Columns: province, city, district, station_id, "
+            "latitude, longitude, avg_temp_c, max_temp_c, min_temp_c, humidity_percent, wind_speed_kmh."
+        ),
+        "source": "semantic",
+        "score": 0.94,
+    },
+    {
+        "table_name": "employee_compensation_upload",
+        "columns": ["department", "employee_name", "salary", "overtime_hours"],
+        "content": "Imported employee compensation table. Columns: department, employee_name, salary, overtime_hours.",
+        "source": "semantic",
+        "score": 0.94,
     },
 ]
 
@@ -181,6 +307,86 @@ class TextMatchSQLBuilderTest(unittest.TestCase):
         self.assertNotIn("AVG(aod.delay_minutes)", result["sql"])
         self.assertNotIn("AVG(aod.revenue_hkd)", result["sql"])
 
+    def test_grouped_average_ranking_by_aircraft_type(self) -> None:
+        result = self.builder.build(
+            question="哪个型号的飞机平均载客量最大",
+            intent_result={
+                "intent_type": "aggregate_query",
+                "entities": {"tables": ["airport_operations_dirty_35_rows"], "metrics": ["average"], "filters": []},
+            },
+            schema_context=SCHEMA_CONTEXT,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["table_name"], "airport_operations_dirty_35_rows")
+        self.assertEqual(result["metric_column"], "passenger_count")
+        self.assertIn("aod.aircraft_type", result["sql"])
+        self.assertIn("AVG(aod.passenger_count) AS average_passenger_count", result["sql"])
+        self.assertIn("GROUP BY aod.aircraft_type", result["sql"])
+        self.assertIn("ORDER BY average_passenger_count DESC", result["sql"])
+        self.assertIn("LIMIT 1", result["sql"])
+        self.assertNotIn("ILIKE '%型号%'", result["sql"])
+        self.assertNotIn("aod.flight_no", result["sql"])
+
+    def test_grouped_average_ranking_works_for_employee_table(self) -> None:
+        result = self.builder.build(
+            question="哪个部门平均工资最高",
+            intent_result={
+                "intent_type": "aggregate_query",
+                "entities": {"tables": [], "metrics": ["average"], "filters": []},
+            },
+            schema_context=SCHEMA_CONTEXT,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["table_name"], "employee_compensation_upload")
+        self.assertEqual(result["metric_column"], "salary")
+        self.assertIn("ecu.department", result["sql"])
+        self.assertIn("AVG(ecu.salary) AS average_salary", result["sql"])
+        self.assertIn("GROUP BY ecu.department", result["sql"])
+        self.assertIn("ORDER BY average_salary DESC", result["sql"])
+        self.assertIn("LIMIT 1", result["sql"])
+        self.assertNotIn("ecu.employee_name", result["sql"])
+
+    def test_grouped_average_ranking_lowest_works_for_employee_table(self) -> None:
+        result = self.builder.build(
+            question="哪个部门平均工资最低",
+            intent_result={
+                "intent_type": "aggregate_query",
+                "entities": {"tables": [], "metrics": ["average"], "filters": []},
+            },
+            schema_context=SCHEMA_CONTEXT,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["table_name"], "employee_compensation_upload")
+        self.assertEqual(result["metric_column"], "salary")
+        self.assertIn("ecu.department", result["sql"])
+        self.assertIn("AVG(ecu.salary) AS average_salary", result["sql"])
+        self.assertIn("GROUP BY ecu.department", result["sql"])
+        self.assertIn("ORDER BY average_salary ASC", result["sql"])
+        self.assertIn("LIMIT 1", result["sql"])
+        self.assertNotIn("ecu.employee_name", result["sql"])
+
+    def test_grouped_average_ranking_respects_top_n_limit(self) -> None:
+        result = self.builder.build(
+            question="前3个型号的飞机平均载客量最大",
+            intent_result={
+                "intent_type": "aggregate_query",
+                "entities": {"tables": ["airport_operations_dirty_35_rows"], "metrics": ["average"], "filters": []},
+            },
+            schema_context=SCHEMA_CONTEXT,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "success")
+        self.assertIn("GROUP BY aod.aircraft_type", result["sql"])
+        self.assertIn("ORDER BY average_passenger_count DESC", result["sql"])
+        self.assertIn("LIMIT 3", result["sql"])
+
     def test_value_matched_table_is_not_crowded_out_by_wrong_intent_tables(self) -> None:
         result = self.builder.build(
             question="B787的平均载客量多少",
@@ -222,6 +428,133 @@ class TextMatchSQLBuilderTest(unittest.TestCase):
         self.assertEqual(result["status"], "needs_clarification")
         self.assertIn("passenger_count", result["reason"])
         self.assertIn("delay_minutes", result["reason"])
+
+    def test_grouped_semantic_average_with_numeric_comparison(self) -> None:
+        result = self.builder.build(
+            question="有哪些地方平均气温低于25摄氏度",
+            intent_result={
+                "intent_type": "simple_lookup",
+                "entities": {"tables": [], "metrics": [], "filters": []},
+            },
+            schema_context=SCHEMA_CONTEXT,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["table_name"], "china_temperature_distribution_150_rows")
+        self.assertEqual(result["metric_column"], "avg_temp_c")
+        self.assertIn("AVG(ctd.avg_temp_c) AS average_avg_temp_c", result["sql"])
+        self.assertIn("GROUP BY", result["sql"])
+        self.assertIn("HAVING AVG(ctd.avg_temp_c) < 25", result["sql"])
+        self.assertIn("ctd.city", result["sql"])
+        self.assertIn("ctd.district", result["sql"])
+        self.assertNotIn("station_id", result["sql"])
+        self.assertNotIn("latitude", result["metric_column"])
+
+    def test_where_average_temperature_lowest_groups_by_location(self) -> None:
+        result = self.builder.build(
+            question="哪里的平均气温最低",
+            intent_result={
+                "intent_type": "ranking_query",
+                "entities": {"tables": ["china_temperature_distribution_150_rows"], "metrics": ["average"], "filters": []},
+            },
+            schema_context=SCHEMA_CONTEXT,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["table_name"], "china_temperature_distribution_150_rows")
+        self.assertEqual(result["metric_column"], "avg_temp_c")
+        self.assertEqual(result["terms"], [])
+        self.assertIn("AVG(ctd.avg_temp_c) AS average_avg_temp_c", result["sql"])
+        self.assertIn("GROUP BY", result["sql"])
+        self.assertIn("ORDER BY average_avg_temp_c ASC", result["sql"])
+        self.assertIn("LIMIT 1", result["sql"])
+        self.assertNotIn("min_temp_c", result["sql"])
+        self.assertNotIn("ILIKE '%哪里%'", result["sql"])
+
+    def test_statistical_qualifier_maps_max_temperature_column(self) -> None:
+        result = self.builder.build(
+            question="有哪些地方最高气温高于30摄氏度",
+            intent_result={
+                "intent_type": "aggregate_query",
+                "entities": {"tables": [], "metrics": [], "filters": []},
+            },
+            schema_context=SCHEMA_CONTEXT,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["table_name"], "china_temperature_distribution_150_rows")
+        self.assertEqual(result["metric_column"], "max_temp_c")
+        self.assertIn("MAX(ctd.max_temp_c) AS maximum_max_temp_c", result["sql"])
+        self.assertIn("HAVING MAX(ctd.max_temp_c) > 30", result["sql"])
+
+    def test_question_text_overrides_noisy_llm_metric_for_max_temperature(self) -> None:
+        result = self.builder.build(
+            question="有哪些地方最高气温高于30摄氏度",
+            intent_result={
+                "intent_type": "aggregate_query",
+                "entities": {"tables": [], "metrics": ["average"], "filters": []},
+            },
+            schema_context=SCHEMA_CONTEXT,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["metric_column"], "max_temp_c")
+        self.assertIn("MAX(ctd.max_temp_c)", result["sql"])
+        self.assertNotIn("AVG(ctd.max_temp_c)", result["sql"])
+
+    def test_statistical_qualifier_maps_min_temperature_column(self) -> None:
+        result = self.builder.build(
+            question="有哪些地方最低气温低于10摄氏度",
+            intent_result={
+                "intent_type": "aggregate_query",
+                "entities": {"tables": [], "metrics": [], "filters": []},
+            },
+            schema_context=SCHEMA_CONTEXT,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["table_name"], "china_temperature_distribution_150_rows")
+        self.assertEqual(result["metric_column"], "min_temp_c")
+        self.assertIn("MIN(ctd.min_temp_c) AS minimum_min_temp_c", result["sql"])
+        self.assertIn("HAVING MIN(ctd.min_temp_c) < 10", result["sql"])
+
+    def test_average_humidity_uses_humidity_not_temperature_or_coordinates(self) -> None:
+        result = self.builder.build(
+            question="哪些地方平均湿度高于70",
+            intent_result={
+                "intent_type": "aggregate_query",
+                "entities": {"tables": [], "metrics": [], "filters": []},
+            },
+            schema_context=SCHEMA_CONTEXT,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["table_name"], "china_temperature_distribution_150_rows")
+        self.assertEqual(result["metric_column"], "humidity_percent")
+        self.assertIn("AVG(ctd.humidity_percent) AS average_humidity_percent", result["sql"])
+        self.assertNotIn("AVG(ctd.latitude)", result["sql"])
+        self.assertNotIn("AVG(ctd.avg_temp_c)", result["sql"])
+
+    def test_statistical_word_alone_still_requires_metric_clarification(self) -> None:
+        result = self.builder.build(
+            question="哪些地方平均数低于25",
+            intent_result={
+                "intent_type": "aggregate_query",
+                "entities": {"tables": [], "metrics": ["average"], "filters": []},
+            },
+            schema_context=SCHEMA_CONTEXT,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertIn("avg_temp_c", result["reason"])
+        self.assertIn("humidity_percent", result["reason"])
 
 
 if __name__ == "__main__":

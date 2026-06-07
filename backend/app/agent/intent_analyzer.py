@@ -43,6 +43,51 @@ TABLE_ALIASES: dict[str, str] = {
     "meeting_participant": "meeting_participants",
 }
 
+AGGREGATE_TERMS = {"平均", "均值", "总和", "合计", "数量", "总数", "次数", "多少", "avg", "average", "mean", "sum", "count"}
+COMPARISON_TERMS = {
+    "低于",
+    "小于",
+    "少于",
+    "不超过",
+    "以下",
+    "高于",
+    "大于",
+    "超过",
+    "多于",
+    "以上",
+    "below",
+    "under",
+    "less than",
+    "above",
+    "over",
+    "greater than",
+}
+DIMENSION_REQUEST_TERMS = {"哪些", "哪个", "哪一个", "谁", "地方", "地点", "地区", "城市", "省份", "国家", "where", "which", "who"}
+METRIC_SUBJECT_TERMS = {
+    "气温",
+    "温度",
+    "摄氏",
+    "华氏",
+    "载客量",
+    "乘客",
+    "旅客",
+    "客量",
+    "收入",
+    "营收",
+    "金额",
+    "价格",
+    "费用",
+    "成本",
+    "时长",
+    "工时",
+    "小时",
+    "分钟",
+    "延误",
+    "迟到",
+    "数量",
+    "次数",
+}
+
 
 @dataclass
 class IntentAnalysisResult:
@@ -115,7 +160,22 @@ class IntentAnalyzer:
         if intent_type not in INTENT_TYPE_SET:
             raise ValueError(f"unsupported intent_type: {intent_type}")
 
-        entities = self._normalize_entities(raw.get("entities"), question.lower())
+        question_lower = question.lower()
+        entities = self._normalize_entities(raw.get("entities"), question_lower)
+        inferred_intent_type = self._infer_intent_type(question_lower, [], entities["tables"])
+        if self._is_destructive_question(question_lower):
+            intent_type = "unsupported"
+        else:
+            intent_type = self._merge_intent_type(intent_type, inferred_intent_type, entities)
+
+        requires_clarification = bool(raw.get("requires_clarification", False))
+        if requires_clarification and self._can_continue_without_intent_clarification(
+            question_lower,
+            intent_type,
+            entities,
+        ):
+            requires_clarification = False
+
         if intent_type == "simple_lookup" and len(entities["tables"]) >= 2:
             intent_type = "join_query"
         confidence = self._clamp_confidence(raw.get("confidence", 0.0))
@@ -123,13 +183,76 @@ class IntentAnalyzer:
             intent_type=intent_type,
             confidence=confidence,
             is_follow_up=bool(raw.get("is_follow_up", False)),
-            requires_clarification=bool(raw.get("requires_clarification", False)),
-            clarification_question=self._optional_string(raw.get("clarification_question")),
+            requires_clarification=requires_clarification,
+            clarification_question=(
+                self._optional_string(raw.get("clarification_question")) if requires_clarification else None
+            ),
             entities=entities,
             reason=str(raw.get("reason") or "LLM returned a valid intent classification."),
             source="llm",
             raw_response=raw,
         )
+
+    def _merge_intent_type(
+        self,
+        llm_intent_type: str,
+        inferred_intent_type: str,
+        entities: dict[str, Any],
+    ) -> str:
+        if llm_intent_type == "simple_lookup" and inferred_intent_type in {
+            "aggregate_query",
+            "ranking_query",
+            "time_series_query",
+            "follow_up_query",
+        }:
+            return inferred_intent_type
+        if llm_intent_type == "simple_lookup" and len(entities["tables"]) >= 2:
+            return "join_query"
+        return llm_intent_type
+
+    def _can_continue_without_intent_clarification(
+        self,
+        question_lower: str,
+        intent_type: str,
+        entities: dict[str, Any],
+    ) -> bool:
+        if intent_type == "unsupported":
+            return False
+
+        if self._has_aggregate_comparison(question_lower) and self._has_dimension_request(question_lower):
+            return True
+
+        if "average" in entities.get("metrics", []) and self._has_metric_subject(question_lower):
+            return True
+
+        actionable_intents = {"aggregate_query", "ranking_query", "time_series_query", "join_query"}
+        has_actionable_entity = any(
+            [
+                entities.get("tables"),
+                entities.get("metrics"),
+                entities.get("filters"),
+                entities.get("time_range"),
+                entities.get("sort"),
+                entities.get("limit"),
+            ]
+        )
+        return intent_type in actionable_intents and has_actionable_entity and self._has_query_shape(question_lower)
+
+    def _has_aggregate_comparison(self, question_lower: str) -> bool:
+        has_aggregate = any(term in question_lower for term in AGGREGATE_TERMS)
+        has_comparison = any(term in question_lower for term in COMPARISON_TERMS)
+        has_number = any(character.isdigit() for character in question_lower)
+        return has_aggregate and has_comparison and has_number
+
+    def _has_dimension_request(self, question_lower: str) -> bool:
+        return any(term in question_lower for term in DIMENSION_REQUEST_TERMS)
+
+    def _has_metric_subject(self, question_lower: str) -> bool:
+        return any(term in question_lower for term in METRIC_SUBJECT_TERMS)
+
+    def _has_query_shape(self, question_lower: str) -> bool:
+        query_terms = {"哪些", "哪个", "谁", "多少", "列出", "查询", "查看", "show", "list", "which", "who", "what"}
+        return any(term in question_lower for term in query_terms)
 
     def _fallback_result(
         self,
@@ -167,8 +290,7 @@ class IntentAnalyzer:
         conversation_context: list[dict[str, Any]],
         tables: list[str],
     ) -> str:
-        destructive_terms = ["删除", "删掉", "清空", "drop", "delete", "update", "insert", "truncate", "alter"]
-        if any(term in question_lower for term in destructive_terms):
+        if self._is_destructive_question(question_lower):
             return "unsupported"
 
         if conversation_context and any(term in question_lower for term in ["那", "它", "他们", "继续", "再查", "这个"]):
@@ -191,6 +313,10 @@ class IntentAnalyzer:
 
         return "simple_lookup"
 
+    def _is_destructive_question(self, question_lower: str) -> bool:
+        destructive_terms = ["删除", "删掉", "清空", "drop", "delete", "update", "insert", "truncate", "alter"]
+        return any(term in question_lower for term in destructive_terms)
+
     def _infer_tables(self, question_lower: str) -> list[str]:
         tables = []
         for table_name, terms in TABLE_HINTS.items():
@@ -204,8 +330,12 @@ class IntentAnalyzer:
             metrics.append("count")
         if any(term in question_lower for term in ["平均", "avg"]):
             metrics.append("average")
+        if any(term in question_lower for term in ["合计", "总和", "sum"]):
+            metrics.append("sum")
         if any(term in question_lower for term in ["时长", "工时", "小时", "分钟"]):
             metrics.append("duration")
+        if any(term in question_lower for term in ["气温", "温度", "摄氏", "华氏"]):
+            metrics.append("temperature")
         return metrics
 
     def _infer_filters(self, question_lower: str) -> list[str]:
@@ -244,13 +374,14 @@ class IntentAnalyzer:
         raw = raw_entities if isinstance(raw_entities, dict) else {}
         table_names = self._normalize_table_names(raw.get("tables"))
         table_names = self._merge_unique(table_names, self._infer_tables(question_lower))
+        raw_limit = self._optional_int(raw.get("limit"))
         return {
             "tables": table_names,
-            "metrics": self._string_list(raw.get("metrics")),
-            "filters": self._string_list(raw.get("filters")),
-            "time_range": self._optional_string(raw.get("time_range")),
-            "sort": self._optional_string(raw.get("sort")),
-            "limit": self._optional_int(raw.get("limit")),
+            "metrics": self._merge_unique(self._string_list(raw.get("metrics")), self._infer_metrics(question_lower)),
+            "filters": self._merge_unique(self._string_list(raw.get("filters")), self._infer_filters(question_lower)),
+            "time_range": self._optional_string(raw.get("time_range")) or self._infer_time_range(question_lower),
+            "sort": self._optional_string(raw.get("sort")) or self._infer_sort(question_lower),
+            "limit": raw_limit if raw_limit is not None else self._infer_limit(question_lower),
         }
 
     def _normalize_table_names(self, value: Any) -> list[str]:

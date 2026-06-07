@@ -7,6 +7,7 @@ class FakeSchemaService:
     def list_tables(self):
         return [
             {"name": "airport_operations_dirty_35_rows"},
+            {"name": "china_temperature_distribution_150_rows"},
             {"name": "users"},
         ]
 
@@ -30,6 +31,18 @@ class FakeSchemaService:
                 ],
                 "foreign_keys": [],
             },
+            "china_temperature_distribution_150_rows": {
+                "name": "china_temperature_distribution_150_rows",
+                "description": "Imported from file: china_temperature_distribution_150_rows.xlsx",
+                "columns": [
+                    {"name": "country", "type": "TEXT"},
+                    {"name": "province", "type": "TEXT"},
+                    {"name": "city", "type": "TEXT"},
+                    {"name": "district", "type": "TEXT"},
+                    {"name": "avg_temp_c", "type": "NUMERIC"},
+                ],
+                "foreign_keys": [],
+            },
         }
         return schemas.get(table_name)
 
@@ -46,6 +59,14 @@ class FakeDocumentService:
                 "table_name": "users",
                 "columns": ["id", "name"],
                 "content": "Table: users\nColumns: id, name",
+            },
+            {
+                "table_name": "china_temperature_distribution_150_rows",
+                "columns": ["country", "province", "city", "district", "avg_temp_c"],
+                "content": (
+                    "Table: china_temperature_distribution_150_rows\n"
+                    "Columns: country, province, city, district, avg_temp_c"
+                ),
             },
         ]
 
@@ -114,7 +135,7 @@ class SchemaRetrieverTest(unittest.TestCase):
 
         self.assertEqual(value_matcher.calls, 1)
         self.assertEqual(result["matches"][0]["table_name"], "airport_operations_dirty_35_rows")
-        self.assertEqual(result["matches"][0]["source"], "value")
+        self.assertIn("value", result["matches"][0]["source"])
 
     def test_restricted_preferred_table_skips_global_search(self) -> None:
         vector_store = FakeVectorStore()
@@ -132,6 +153,14 @@ class SchemaRetrieverTest(unittest.TestCase):
         self.assertEqual(value_matcher.calls, 0)
         self.assertEqual([match["table_name"] for match in result["matches"]], ["airport_operations_dirty_35_rows"])
         self.assertEqual(result["matches"][0]["source"], "selected_scope")
+
+    def test_semantic_match_finds_uploaded_table_by_metric_meaning(self) -> None:
+        retriever = self.make_retriever()
+
+        result = retriever.retrieve("有哪些地方平均气温低于25摄氏度", top_k=5)
+
+        self.assertEqual(result["matches"][0]["table_name"], "china_temperature_distribution_150_rows")
+        self.assertIn("semantic", result["matches"][0]["source"])
 
     def test_value_term_extraction_handles_codes_and_chinese_values(self) -> None:
         matcher = SchemaValueMatcher(FakeSchemaService(), db_engine=object())

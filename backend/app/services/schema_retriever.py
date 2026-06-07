@@ -48,6 +48,52 @@ VALUE_QUERY_STOPWORDS = {
     "count",
 }
 
+SCHEMA_SEMANTIC_ALIASES: dict[str, set[str]] = {
+    "平均": {"avg", "average", "mean"},
+    "均值": {"avg", "average", "mean"},
+    "气温": {"temp", "temperature"},
+    "温度": {"temp", "temperature"},
+    "摄氏": {"c", "celsius", "centigrade"},
+    "华氏": {"f", "fahrenheit"},
+    "地方": {"place", "location", "region", "area", "country", "province", "city", "district"},
+    "地点": {"place", "location", "region", "area", "country", "province", "city", "district"},
+    "地区": {"region", "area", "country", "province", "city", "district"},
+    "城市": {"city"},
+    "省份": {"province", "state"},
+    "省": {"province", "state"},
+    "国家": {"country"},
+    "区": {"district", "area"},
+    "数量": {"count", "number", "quantity"},
+    "数目": {"count", "number", "quantity"},
+    "个数": {"count", "number", "quantity"},
+    "人数": {"count", "number", "people", "person"},
+    "金额": {"amount", "money", "revenue", "price", "cost"},
+    "收入": {"revenue", "income", "amount"},
+    "营收": {"revenue", "income", "amount"},
+    "费用": {"cost", "expense", "amount"},
+    "价格": {"price", "amount"},
+    "成本": {"cost", "amount"},
+    "乘客": {"passenger", "traveler", "pax", "count"},
+    "旅客": {"passenger", "traveler", "pax", "count"},
+    "载客": {"passenger", "traveler", "pax", "count"},
+    "客量": {"passenger", "traveler", "pax", "count"},
+    "时长": {"duration", "minutes", "hours", "time"},
+    "分钟": {"minute", "minutes", "duration"},
+    "小时": {"hour", "hours", "duration"},
+    "延迟": {"delay", "late", "minutes"},
+    "迟到": {"delay", "late", "minutes"},
+    "员工": {"employee", "staff", "user", "person"},
+    "人员": {"employee", "staff", "user", "person"},
+    "用户": {"user", "employee", "person"},
+    "设备": {"device", "equipment", "machine"},
+    "机器": {"machine", "equipment", "device"},
+    "机械": {"machine", "equipment", "device"},
+    "日期": {"date", "day"},
+    "时间": {"time", "datetime", "timestamp"},
+}
+
+SCHEMA_SEMANTIC_MIN_SCORE = 18
+
 
 class SchemaRetriever:
     def __init__(
@@ -106,6 +152,7 @@ class SchemaRetriever:
         matches = [self._build_vector_match(result) for result in vector_matches]
         if use_keyword_fallback:
             matches.extend(self._keyword_matches(normalized_question))
+            matches.extend(self._semantic_matches(normalized_question))
             matches.extend(self._value_matches(normalized_question))
         if preferred_tables:
             matches.extend(self._selected_scope_matches(preferred_tables))
@@ -177,6 +224,43 @@ class SchemaRetriever:
         except Exception:
             return []
 
+    def _semantic_matches(self, question: str) -> list[dict[str, Any]]:
+        question_terms = self._semantic_terms(question)
+        if not question_terms:
+            return []
+
+        matches = []
+        for document in self.document_service.build_documents():
+            table_name = document["table_name"]
+            table_schema = self.schema_service.get_table_schema(table_name)
+            if not table_schema:
+                continue
+
+            table_terms = self._semantic_terms(self._semantic_table_text(table_schema, document))
+            overlap = question_terms & table_terms
+            score_points = len(overlap) * 5
+
+            lowered_question = question.lower()
+            for alias, expansions in SCHEMA_SEMANTIC_ALIASES.items():
+                if alias in lowered_question and (expansions & table_terms):
+                    score_points += 10
+
+            if score_points < SCHEMA_SEMANTIC_MIN_SCORE:
+                continue
+
+            matches.append(
+                {
+                    "table_name": table_name,
+                    "columns": self._column_names(table_name),
+                    "score": min(0.94, 0.7 + score_points / 100),
+                    "distance": None,
+                    "source": "semantic",
+                    "content": document["content"],
+                }
+            )
+
+        return matches
+
     def _selected_scope_matches(self, table_names: list[str]) -> list[dict[str, Any]]:
         documents_by_table = {
             document["table_name"]: document
@@ -244,6 +328,32 @@ class SchemaRetriever:
 
     def _table_name_from_id(self, document_id: str) -> str:
         return document_id.rsplit(":", maxsplit=1)[-1]
+
+    def _semantic_table_text(self, table_schema: dict[str, Any], document: dict[str, Any]) -> str:
+        parts = [
+            str(table_schema.get("name") or ""),
+            str(table_schema.get("description") or ""),
+            str(document.get("content") or ""),
+        ]
+        for column in table_schema.get("columns", []):
+            parts.append(str(column.get("name") or ""))
+            parts.append(str(column.get("description") or ""))
+            parts.append(str(column.get("type") or ""))
+        return " ".join(parts)
+
+    def _semantic_terms(self, text_value: str) -> set[str]:
+        lowered = text_value.lower()
+        terms = set(re.findall(r"[a-z0-9]+", lowered))
+        for cjk_part in re.findall(r"[\u4e00-\u9fff]+", lowered):
+            terms.add(cjk_part)
+            if len(cjk_part) >= 2:
+                terms.update(cjk_part[index : index + 2] for index in range(len(cjk_part) - 1))
+
+        for alias, expansions in SCHEMA_SEMANTIC_ALIASES.items():
+            if alias in lowered:
+                terms.add(alias)
+                terms.update(expansions)
+        return {term for term in terms if term}
 
     def _distance_to_score(self, distance: float | None) -> float:
         if distance is None:

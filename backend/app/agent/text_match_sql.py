@@ -11,6 +11,9 @@ QUESTION_STOPWORDS = {
     "什么",
     "哪个",
     "哪些",
+    "哪里",
+    "哪儿",
+    "何处",
     "哪一个",
     "是多少",
     "是什么",
@@ -59,6 +62,7 @@ QUESTION_STOPWORDS = {
     "what",
     "which",
     "who",
+    "where",
     "find",
     "search",
     "show",
@@ -134,12 +138,89 @@ LOOKUP_TERMS = {
 
 AGGREGATE_AVERAGE_TERMS = {"平均", "均值", "average", "avg", "mean"}
 AGGREGATE_SUM_TERMS = {"合计", "总和", "总额", "sum", "total"}
+AGGREGATE_MAX_TERMS = {"最高", "最大", "max", "maximum", "highest", "largest"}
+AGGREGATE_MIN_TERMS = {"最低", "最小", "min", "minimum", "lowest", "smallest"}
 AGGREGATE_COUNT_TERMS = {"多少", "数量", "总数", "个数", "count", "number"}
-AGGREGATE_CONTROL_TERMS = AGGREGATE_AVERAGE_TERMS | AGGREGATE_SUM_TERMS | AGGREGATE_COUNT_TERMS
+AGGREGATE_CONTROL_TERMS = (
+    AGGREGATE_AVERAGE_TERMS
+    | AGGREGATE_SUM_TERMS
+    | AGGREGATE_MAX_TERMS
+    | AGGREGATE_MIN_TERMS
+    | AGGREGATE_COUNT_TERMS
+)
 
 IDENTIFIER_COLUMN_NAMES = {"id", "pk", "key"}
 
+STATISTICAL_ROLE_TERMS: dict[str, set[str]] = {
+    "average": {"avg", "average", "mean"},
+    "maximum": {"max", "maximum", "highest", "largest"},
+    "minimum": {"min", "minimum", "lowest", "smallest"},
+    "sum": {"sum", "total"},
+    "count": {"count", "number", "qty", "quantity"},
+}
+STATISTICAL_ROLE_QUESTION_TERMS: dict[str, set[str]] = {
+    "average": AGGREGATE_AVERAGE_TERMS,
+    "maximum": AGGREGATE_MAX_TERMS,
+    "minimum": AGGREGATE_MIN_TERMS,
+    "sum": AGGREGATE_SUM_TERMS,
+    "count": AGGREGATE_COUNT_TERMS,
+}
+CONFLICTING_STATISTICAL_ROLES = {"average", "maximum", "minimum", "sum"}
+COORDINATE_COLUMN_TERMS = {"lat", "latitude", "lng", "lon", "long", "longitude"}
+COORDINATE_QUESTION_TERMS = {"经度", "纬度", "坐标", "longitude", "latitude", "coordinate", "coordinates"}
+RANKING_DESC_TERMS = {
+    "最大",
+    "最高",
+    "最多",
+    "最长",
+    "top",
+    "highest",
+    "largest",
+    "most",
+    "longest",
+}
+RANKING_ASC_TERMS = {
+    "最小",
+    "最低",
+    "最少",
+    "最短",
+    "lowest",
+    "smallest",
+    "least",
+    "shortest",
+}
+
 SEMANTIC_ALIASES: dict[str, set[str]] = {
+    "气温": {"temp", "temperature"},
+    "温度": {"temp", "temperature"},
+    "摄氏": {"c", "celsius", "centigrade"},
+    "华氏": {"f", "fahrenheit"},
+    "湿度": {"humidity", "humid", "percent", "pct"},
+    "风速": {"wind", "speed", "kmh", "kph"},
+    "油耗": {"fuel", "consumption", "usage", "rate"},
+    "耗油": {"fuel", "consumption", "usage", "rate"},
+    "燃油": {"fuel"},
+    "地方": {"place", "location", "region", "area", "country", "province", "city", "district"},
+    "地点": {"place", "location", "region", "area", "country", "province", "city", "district"},
+    "哪里": {"place", "location", "region", "area", "country", "province", "city", "district"},
+    "哪儿": {"place", "location", "region", "area", "country", "province", "city", "district"},
+    "何处": {"place", "location", "region", "area", "country", "province", "city", "district"},
+    "地区": {"region", "area", "country", "province", "city", "district"},
+    "城市": {"city"},
+    "省份": {"province", "state"},
+    "省": {"province", "state"},
+    "国家": {"country"},
+    "区": {"district", "area"},
+    "型号": {"model", "type", "category", "class"},
+    "机型": {"aircraft", "airplane", "plane", "model", "type"},
+    "飞机": {"aircraft", "airplane", "plane"},
+    "类型": {"type", "category", "kind", "class"},
+    "类别": {"category", "type", "kind", "class"},
+    "种类": {"category", "type", "kind", "class"},
+    "部门": {"department", "team", "organization", "org"},
+    "团队": {"team", "department", "group"},
+    "项目": {"project"},
+    "名称": {"name", "title", "label"},
     "数量": {"count", "number", "quantity"},
     "数目": {"count", "number", "quantity"},
     "个数": {"count", "number", "quantity"},
@@ -174,6 +255,55 @@ SEMANTIC_ALIASES: dict[str, set[str]] = {
     "班次": {"flight"},
     "日期": {"date", "day"},
     "时间": {"time", "datetime", "timestamp"},
+}
+
+LOWER_THAN_TERMS = ("低于", "小于", "少于", "低过", "不超过", "below", "less than", "under")
+GREATER_THAN_TERMS = ("高于", "大于", "超过", "多于", "above", "greater than", "over", "more than")
+DIMENSION_REQUEST_TERMS = {
+    "哪些",
+    "哪个",
+    "哪里",
+    "哪儿",
+    "何处",
+    "哪一个",
+    "哪类",
+    "哪种",
+    "哪台",
+    "地方",
+    "地点",
+    "地区",
+    "城市",
+    "省份",
+    "国家",
+    "型号",
+    "机型",
+    "类型",
+    "类别",
+    "种类",
+    "部门",
+    "团队",
+    "员工",
+    "人员",
+    "设备",
+    "项目",
+    "where",
+    "which",
+}
+DIMENSION_COLUMN_HINTS = {
+    "country",
+    "province",
+    "state",
+    "city",
+    "district",
+    "region",
+    "area",
+    "location",
+    "place",
+    "name",
+    "department",
+    "project",
+    "category",
+    "type",
 }
 
 
@@ -262,7 +392,7 @@ class TextMatchSQLBuilder:
         schema_context: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         operator = self._aggregate_operator(question, intent_result)
-        if operator not in {"average", "sum"}:
+        if operator not in {"average", "sum", "maximum", "minimum"}:
             return None
 
         table_results = []
@@ -300,6 +430,53 @@ class TextMatchSQLBuilder:
         )[0]
         metric_column = metric_result["column"]
         alias = self._alias_for(table_name)
+        comparison = self._aggregate_comparison(question)
+        ranking = self._aggregate_ranking(question)
+        if (comparison or ranking) and self._asks_for_dimensions(question):
+            dimension_columns = self._dimension_columns(question, table_schema)
+            if dimension_columns:
+                aggregate_expression = self._aggregate_expression(operator, alias, metric_column)
+                aggregate_alias = self._aggregate_alias(operator, metric_column)
+                selected_dimensions = ", ".join(f"{alias}.{column}" for column in dimension_columns)
+                sql = (
+                    f"SELECT {selected_dimensions}, {aggregate_expression} AS {aggregate_alias}, "
+                    f"COUNT(*) AS matched_rows "
+                    f"FROM {table_name} {alias} "
+                    f"WHERE {alias}.{metric_column} IS NOT NULL "
+                    f"GROUP BY {selected_dimensions} "
+                )
+                if comparison:
+                    sql = f"{sql}HAVING {aggregate_expression} {comparison['operator']} {comparison['value']} "
+                    order_direction = comparison["order"]
+                    limit = self.default_limit
+                else:
+                    order_direction = ranking["order"]
+                    limit = ranking["limit"]
+
+                sql = (
+                    f"{sql}ORDER BY {aggregate_alias} {order_direction}, matched_rows DESC "
+                    f"LIMIT {limit}"
+                )
+                return {
+                    "status": "success",
+                    "sql": sql,
+                    "table_name": table_name,
+                    "terms": [],
+                    "text_columns": dimension_columns,
+                    "selected_columns": [*dimension_columns, metric_column],
+                    "metric_column": metric_column,
+                    "columns_used": [
+                        *[f"{table_name}.{column}" for column in dimension_columns],
+                        f"{table_name}.{metric_column}",
+                    ],
+                    "threshold": 1,
+                    "reason": (
+                        "Generated deterministic grouped aggregate SQL after mapping the requested metric "
+                        f"to {table_name}.{metric_column}."
+                    ),
+                    "source": "semantic_aggregate",
+                }
+
         filter_terms = self._aggregate_filter_terms(question, table_schema, metric_column, operator)
         text_columns = self._text_columns(table_schema)
         where_clause = self._filter_where_clause(alias, text_columns, filter_terms)
@@ -351,11 +528,114 @@ class TextMatchSQLBuilder:
             str(metric).lower()
             for metric in (intent_result.get("entities") or {}).get("metrics") or []
         }
-        if any(term in lowered for term in AGGREGATE_AVERAGE_TERMS) or "average" in metrics:
+        if any(term in lowered for term in AGGREGATE_AVERAGE_TERMS):
             return "average"
-        if any(term in lowered for term in AGGREGATE_SUM_TERMS) or "sum" in metrics:
+        if any(term in lowered for term in AGGREGATE_SUM_TERMS):
             return "sum"
+        if any(term in lowered for term in AGGREGATE_MAX_TERMS):
+            return "maximum"
+        if any(term in lowered for term in AGGREGATE_MIN_TERMS):
+            return "minimum"
+        if "average" in metrics:
+            return "average"
+        if "sum" in metrics:
+            return "sum"
+        if "max" in metrics or "maximum" in metrics:
+            return "maximum"
+        if "min" in metrics or "minimum" in metrics:
+            return "minimum"
         return None
+
+    def _aggregate_comparison(self, question: str) -> dict[str, str] | None:
+        lowered = question.lower()
+        for term in LOWER_THAN_TERMS:
+            value = self._number_after_term(lowered, term)
+            if value is not None:
+                operator = "<=" if term in {"不超过"} else "<"
+                return {"operator": operator, "value": value, "order": "ASC"}
+
+        for term in GREATER_THAN_TERMS:
+            value = self._number_after_term(lowered, term)
+            if value is not None:
+                return {"operator": ">", "value": value, "order": "DESC"}
+
+        below_suffix = re.search(r"([+-]?\d+(?:\.\d+)?)\s*(?:以下|以内)", lowered)
+        if below_suffix:
+            return {"operator": "<=", "value": below_suffix.group(1), "order": "ASC"}
+
+        above_suffix = re.search(r"([+-]?\d+(?:\.\d+)?)\s*(?:以上|以外)", lowered)
+        if above_suffix:
+            return {"operator": ">=", "value": above_suffix.group(1), "order": "DESC"}
+
+        return None
+
+    def _aggregate_ranking(self, question: str) -> dict[str, Any] | None:
+        lowered = question.lower()
+        if any(term in lowered for term in RANKING_DESC_TERMS):
+            return {"order": "DESC", "limit": self._ranking_limit(lowered)}
+        if any(term in lowered for term in RANKING_ASC_TERMS):
+            return {"order": "ASC", "limit": self._ranking_limit(lowered)}
+        return None
+
+    def _ranking_limit(self, lowered_question: str) -> int:
+        patterns = [
+            r"前\s*(\d+)",
+            r"top\s*(\d+)",
+            r"top\s+(\d+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, lowered_question)
+            if not match:
+                continue
+            try:
+                return max(1, min(self.default_limit, int(match.group(1))))
+            except (TypeError, ValueError):
+                continue
+        return 1
+
+    def _number_after_term(self, lowered_question: str, term: str) -> str | None:
+        escaped_term = re.escape(term)
+        match = re.search(rf"{escaped_term}\s*([+-]?\d+(?:\.\d+)?)", lowered_question)
+        if not match:
+            return None
+        return match.group(1)
+
+    def _asks_for_dimensions(self, question: str) -> bool:
+        lowered = question.lower()
+        return any(term in lowered for term in DIMENSION_REQUEST_TERMS)
+
+    def _dimension_columns(self, question: str, table_schema: dict[str, Any]) -> list[str]:
+        text_columns = [
+            column
+            for column in table_schema.get("columns", [])
+            if str(column.get("name") or "") in self._text_columns(table_schema)
+            and not self._is_identifier_column(column)
+        ]
+        if not text_columns:
+            return []
+
+        scored = []
+        question_terms = self._semantic_terms(question)
+        for column in text_columns:
+            column_name = str(column.get("name") or "")
+            column_terms = self._semantic_terms(self._column_semantic_text(column))
+            overlap = question_terms & column_terms
+            score = len(overlap) * 10
+            if column_terms & DIMENSION_COLUMN_HINTS:
+                score += 12
+            if any(hint in column_name.lower() for hint in DIMENSION_COLUMN_HINTS):
+                score += 8
+            scored.append({"column": column_name, "score": score, "has_direct_match": bool(overlap)})
+
+        scored.sort(key=lambda item: (-item["score"], item["column"]))
+        direct_matches = [item["column"] for item in scored if item["has_direct_match"] and item["score"] > 0][:4]
+        if direct_matches:
+            return direct_matches
+
+        selected = [item["column"] for item in scored if item["score"] > 0][:4]
+        if selected:
+            return selected
+        return [str(column.get("name")) for column in text_columns[:3] if column.get("name")]
 
     def _resolve_metric_column(self, question: str, table_schema: dict[str, Any]) -> dict[str, Any]:
         metric_columns = self._metric_columns(table_schema)
@@ -390,11 +670,17 @@ class TextMatchSQLBuilder:
                 "status": "ambiguous",
                 "column": None,
                 "score": best["score"],
-                "options": [item["column"] for item in scored[:5]],
+                "options": self._clarification_options(scored),
                 "matches": best["matches"],
             }
 
         return {"status": "missing", "column": None, "score": best["score"], "options": [best["column"]]}
+
+    def _clarification_options(self, scored_columns: list[dict[str, Any]]) -> list[str]:
+        positive_options = [item["column"] for item in scored_columns if item["score"] > 0]
+        if positive_options:
+            return positive_options[:5]
+        return [item["column"] for item in scored_columns[:5]]
 
     def _semantic_column_score(self, question: str, column: dict[str, Any]) -> tuple[int, list[str]]:
         question_terms = self._semantic_terms(question)
@@ -415,11 +701,122 @@ class TextMatchSQLBuilder:
         column_name = str(column.get("name") or "").lower()
         if column_name and column_name in lowered_question:
             score += 20
+        has_metric_evidence = score > 0
+
+        question_roles = self._question_field_statistical_roles(lowered_question)
+        column_roles = self._column_statistical_roles(column_terms)
+        matching_roles = question_roles & column_roles
+        if has_metric_evidence and matching_roles:
+            score += 18 * len(matching_roles)
+            matches.extend(sorted(matching_roles))
+
+        conflicting_roles = (
+            has_metric_evidence
+            and (question_roles & CONFLICTING_STATISTICAL_ROLES)
+            and (column_roles & CONFLICTING_STATISTICAL_ROLES)
+            and not matching_roles
+        )
+        if conflicting_roles:
+            score -= 10
+
         if self._is_identifier_column(column):
             score -= 8
-        if any(term in column_name for term in ["count", "number", "amount", "total", "score", "rate"]):
+        if self._is_coordinate_column(column):
+            if self._asks_for_coordinate(lowered_question):
+                score += 12
+            else:
+                score -= 10
+        if score > 0 and any(term in column_name for term in ["count", "number", "amount", "total", "score", "rate"]):
             score += 2
         return max(score, 0), sorted(set(matches))
+
+    def _question_statistical_roles(self, lowered_question: str) -> set[str]:
+        roles = set()
+        for role, terms in STATISTICAL_ROLE_QUESTION_TERMS.items():
+            if any(term in lowered_question for term in terms):
+                roles.add(role)
+        return roles
+
+    def _question_field_statistical_roles(self, lowered_question: str) -> set[str]:
+        roles = self._question_statistical_roles(lowered_question)
+        if "average" in roles and roles & {"maximum", "minimum"}:
+            field_qualifier_roles = self._statistical_field_qualifier_roles(lowered_question)
+            if field_qualifier_roles:
+                return roles & field_qualifier_roles
+            roles -= {"maximum", "minimum"}
+        return roles
+
+    def _statistical_field_qualifier_roles(self, lowered_question: str) -> set[str]:
+        qualifier_roles = set()
+        for role, terms in {
+            "maximum": AGGREGATE_MAX_TERMS,
+            "minimum": AGGREGATE_MIN_TERMS,
+        }.items():
+            if self._has_statistical_field_qualifier(lowered_question, terms):
+                qualifier_roles.add(role)
+        return qualifier_roles
+
+    def _has_statistical_field_qualifier(self, lowered_question: str, statistical_terms: set[str]) -> bool:
+        subject_terms = self._metric_subject_terms()
+        for statistical_term in sorted(statistical_terms, key=len, reverse=True):
+            search_start = 0
+            while True:
+                statistical_index = lowered_question.find(statistical_term, search_start)
+                if statistical_index < 0:
+                    break
+                statistical_end = statistical_index + len(statistical_term)
+                if self._has_metric_subject_after_statistical_term(
+                    lowered_question,
+                    statistical_end,
+                    subject_terms,
+                ):
+                    return True
+                search_start = statistical_end
+        return False
+
+    def _has_metric_subject_after_statistical_term(
+        self,
+        lowered_question: str,
+        statistical_end: int,
+        subject_terms: set[str],
+    ) -> bool:
+        for subject_term in sorted(subject_terms, key=len, reverse=True):
+            subject_index = lowered_question.find(subject_term, statistical_end)
+            if subject_index < 0:
+                continue
+            segment = lowered_question[statistical_end:subject_index]
+            if self._is_direct_metric_qualifier_segment(segment):
+                return True
+        return False
+
+    def _is_direct_metric_qualifier_segment(self, segment: str) -> bool:
+        if any(term in segment for term in AGGREGATE_AVERAGE_TERMS | AGGREGATE_SUM_TERMS | AGGREGATE_COUNT_TERMS):
+            return False
+        return bool(re.fullmatch(r"[\s_\-的之这个该一项个种类字段列指标数值]{0,8}", segment))
+
+    def _metric_subject_terms(self) -> set[str]:
+        excluded_terms = (
+            set(QUESTION_STOPWORDS)
+            | QUERY_TYPE_TERMS
+            | AGGREGATE_CONTROL_TERMS
+            | DIMENSION_REQUEST_TERMS
+            | DIMENSION_COLUMN_HINTS
+            | {"place", "location", "region", "area", "country", "province", "city", "district"}
+        )
+        terms = set()
+        for alias, expansions in SEMANTIC_ALIASES.items():
+            for term in {alias, *expansions}:
+                lowered_term = str(term).lower()
+                if len(lowered_term) >= 2 and lowered_term not in excluded_terms:
+                    terms.add(lowered_term)
+        return terms
+
+    def _column_statistical_roles(self, column_terms: set[str]) -> set[str]:
+        roles = set()
+        for role, terms in STATISTICAL_ROLE_TERMS.items():
+            if column_terms & terms:
+                roles.add(role)
+        return roles
 
     def _metric_columns(self, table_schema: dict[str, Any]) -> list[dict[str, Any]]:
         numeric_columns = []
@@ -442,13 +839,25 @@ class TextMatchSQLBuilder:
             or column_name.startswith("id_")
         )
 
+    def _is_coordinate_column(self, column: dict[str, Any]) -> bool:
+        column_terms = self._semantic_terms(self._column_semantic_text(column))
+        return bool(column_terms & COORDINATE_COLUMN_TERMS)
+
+    def _asks_for_coordinate(self, lowered_question: str) -> bool:
+        return any(term in lowered_question for term in COORDINATE_QUESTION_TERMS)
+
     def _column_semantic_text(self, column: dict[str, Any]) -> str:
         return " ".join(
             [
                 str(column.get("name") or ""),
-                str(column.get("description") or ""),
+                self._clean_column_description(str(column.get("description") or "")),
             ]
         )
+
+    def _clean_column_description(self, description: str) -> str:
+        cleaned = re.sub(r";?\s*inferred type\s*:\s*[^;]+", " ", description, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\boriginal column\s*:\s*", " ", cleaned, flags=re.IGNORECASE)
+        return cleaned
 
     def _semantic_terms(self, text: str) -> set[str]:
         lowered = text.lower()
@@ -518,6 +927,8 @@ class TextMatchSQLBuilder:
             return False
         if len(term) < 2:
             return False
+        if term.isdigit():
+            return False
         return True
 
     def _filter_where_clause(self, alias: str, text_columns: list[str], filter_terms: list[str]) -> str:
@@ -537,10 +948,19 @@ class TextMatchSQLBuilder:
     def _aggregate_expression(self, operator: str, alias: str, metric_column: str) -> str:
         if operator == "sum":
             return f"SUM({alias}.{metric_column})"
+        if operator == "maximum":
+            return f"MAX({alias}.{metric_column})"
+        if operator == "minimum":
+            return f"MIN({alias}.{metric_column})"
         return f"AVG({alias}.{metric_column})"
 
     def _aggregate_alias(self, operator: str, metric_column: str) -> str:
-        prefix = "total" if operator == "sum" else "average"
+        prefixes = {
+            "sum": "total",
+            "maximum": "maximum",
+            "minimum": "minimum",
+        }
+        prefix = prefixes.get(operator, "average")
         return f"{prefix}_{metric_column}"
 
     def _extract_terms(self, question: str, schema_context: list[dict[str, Any]]) -> list[str]:
@@ -605,6 +1025,11 @@ class TextMatchSQLBuilder:
         schema_context: list[dict[str, Any]],
     ) -> list[str]:
         candidates: list[str] = []
+        intent_table_names = {
+            str(table_name)
+            for table_name in (intent_result.get("entities") or {}).get("tables") or []
+            if table_name
+        }
         for table_name in (intent_result.get("entities") or {}).get("tables") or []:
             if table_name and table_name not in candidates:
                 candidates.append(str(table_name))
@@ -621,7 +1046,10 @@ class TextMatchSQLBuilder:
         return sorted(
             candidates,
             key=lambda table_name: (
-                -self._table_target_score(question, table_name, context_by_table.get(table_name, {})),
+                -(
+                    self._table_target_score(question, table_name, context_by_table.get(table_name, {}))
+                    + (40 if table_name in intent_table_names else 0)
+                ),
                 candidates.index(table_name),
             ),
         )
